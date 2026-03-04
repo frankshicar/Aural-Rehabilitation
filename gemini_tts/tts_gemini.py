@@ -1,4 +1,8 @@
 import os
+import json
+import random
+import time
+import wave
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
@@ -6,134 +10,127 @@ from google.genai import types
 # 載入 .env 檔案中的環境變數
 load_dotenv()
 
-# 可選的聲音列表
-AVAILABLE_VOICES = ["Puck", "Charon", "Kore", "Fenrir", "Aoede"]
+# Set up the wave file to save the output:
+def wave_file(filename, pcm, channels=1, rate=24000, sample_width=2):
+    with wave.open(filename, "wb") as wf:
+        wf.setnchannels(channels)
+        wf.setsampwidth(sample_width)
+        wf.setframerate(rate)
+        wf.writeframes(pcm)
 
 
-def generate_speech(client, text: str, voice_name: str, output_filename: str):
+def load_word_lists(filepath="word_lists.json"):
+    """載入字詞表"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    full_path = os.path.join(script_dir, filepath)
+    with open(full_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def pick_random_word(word_lists):
     """
-    使用 Gemini API 將文字轉為音訊並存檔
-
-    :param client: Gemini 客戶端
-    :param text: 要轉換的文字
-    :param voice_name: 人物聲音名稱 (可選: Puck, Charon, Kore, Fenrir, Aoede)
-    :param output_filename: 輸出的音訊檔案名稱
+    從 List A (A1/A2/A3) 隨機選一個字，
+    從 List B (B1/B2/B3) 隨機選一個字，
+    組合成一個雙字詞。
     """
-    print(f"\n正在使用 '{voice_name}' 的聲音生成音訊...")
+    # 隨機選一個 A list 和一個 B list
+    a_list_name = random.choice(["list_A1", "list_A2", "list_A3"])
+    b_list_name = random.choice(["list_B1", "list_B2", "list_B3"])
 
-    try:
-        response = client.models.generate_content(
-            model='gemini-2.0-flash',
-            contents=text,
-            config=types.GenerateContentConfig(
-                response_modalities=["AUDIO"],
-                speech_config=types.SpeechConfig(
-                    voice_config=types.VoiceConfig(
-                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                            voice_name=voice_name
-                        )
-                    )
-                )
-            )
-        )
+    a_char = random.choice(word_lists[a_list_name])
+    b_char = random.choice(word_lists[b_list_name])
 
-        # 尋找並儲存回傳的音訊資料
-        for candidate in response.candidates:
-            if candidate.content and candidate.content.parts:
-                for part in candidate.content.parts:
-                    if part.inline_data and part.inline_data.data:
-                        audio_bytes = part.inline_data.data
-                        with open(output_filename, "wb") as f:
-                            f.write(audio_bytes)
-                        print(f"✅ 成功！音訊已儲存至 {output_filename}")
-                        return
-
-        print("⚠️  API 回應成功，但未能在回傳內容中找到音訊資料。")
-
-    except Exception as e:
-        print(f"❌ 呼叫 API 時發生錯誤: {e}")
+    print(f"  A字: {a_char} (from {a_list_name})")
+    print(f"  B字: {b_char} (from {b_list_name})")
+    print(f"  組合: {a_char}{b_char}")
+    return a_char, b_char
 
 
-def select_voice() -> str:
-    """讓使用者選擇聲音，回傳聲音名稱"""
-    print("\n可選擇的聲音:")
-    for i, voice in enumerate(AVAILABLE_VOICES, 1):
-        print(f"  {i}. {voice}")
-    print(f"  0. 保持目前設定")
+def synthesize_word(client, a_char, b_char, max_retries=3):
+    """使用 Gemini TTS 朗讀指定的兩個字"""
+    word = f"{a_char}"
+    word2 = f"{b_char}"
+    print(f"\n正在生成語音:{word}{word2}")
 
-    while True:
-        choice = input("請輸入數字選擇聲音 (直接按 Enter 保持目前設定): ").strip()
-        if choice == "" or choice == "0":
-            return ""
+    for attempt in range(max_retries):
         try:
-            idx = int(choice)
-            if 1 <= idx <= len(AVAILABLE_VOICES):
-                return AVAILABLE_VOICES[idx - 1]
-            else:
-                print(f"  請輸入 1~{len(AVAILABLE_VOICES)} 之間的數字。")
-        except ValueError:
-            # 也允許直接輸入聲音名稱
-            if choice in AVAILABLE_VOICES:
-                return choice
-            print(f"  無效輸入，請輸入數字或聲音名稱。")
+            response = client.models.generate_content(
+                model="gemini-2.5-flash-preview-tts",
+                # contents=f"Say:{word}，{word2}",
+                contents = (
+                    "You are a professional phonetics assistant. "
+                    "Please pronounce these two isolated Chinese characters clearly"
+                    f"for a hearing test: {a_char}{b_char}. "
+                    "Do not interpret the meaning, just read the sounds."
+                ),
+                config=types.GenerateContentConfig(
+                    response_modalities=["AUDIO"],
+                    speech_config=types.SpeechConfig(
+                        language_code='cmn',
+                        voice_config=types.VoiceConfig(
+                            prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                voice_name='Kore',
+                            )
+                        )
+                    ),
+                ),
+            )
 
+            data = response.candidates[0].content.parts[0].inline_data.data
+            # 儲存到 result 資料夾
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            result_dir = os.path.join(script_dir, "result")
+            os.makedirs(result_dir, exist_ok=True)
+            file_name = f"{a_char}{b_char}.wav"
+            file_path = os.path.join(result_dir, file_name)
+            wave_file(file_path, data)
+            print(f"✅ 音訊已儲存至 {file_path}")
+            break
 
-def interactive_mode():
-    """互動模式：手動輸入文字讓 Gemini 朗讀"""
+        except Exception as e:
+            print(f"❌ 生成語音時發生錯誤: {e}")
+
+def main():
     print("=" * 50)
-    print("  Gemini TTS 互動模式")
+    print("  MMRT 字詞 TTS 生成器")
     print("=" * 50)
+
+    # 載入字詞表
+    word_lists = load_word_lists()
+    print("✅ 字詞表載入成功！")
 
     # 初始化 Gemini 客戶端
-    try:
-        client = genai.Client()
-        print("✅ Gemini 客戶端初始化成功！")
-    except Exception as e:
-        print("❌ 用戶端初始化失敗，請確認已設定 GEMINI_API_KEY 環境變數。")
-        print(f"   錯誤訊息: {e}")
-        return
+    client = genai.Client()
+    print("✅ Gemini 客戶端初始化成功！")
 
-    # 預設聲音
-    current_voice = "Aoede"
-    # 輸出檔案計數器
     file_counter = 1
 
-    print(f"\n目前使用的聲音: {current_voice}")
-    print("輸入 'voice' 可更換聲音")
-    print("輸入 'quit' 或 'exit' 可離開程式")
+    print("\n按 Enter 隨機生成一個詞並朗讀")
+    print("輸入 'quit' 或 'exit' 離開")
     print("-" * 50)
 
     while True:
         try:
-            text = input("\n請輸入要朗讀的文字: ").strip()
+            user_input = input("\n按 Enter 生成下一個詞 (或輸入 quit 離開): ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\n\n👋 再見！")
             break
 
-        if not text:
-            print("  ⚠️  請輸入一些文字。")
-            continue
-
-        # 離開指令
-        if text.lower() in ("quit", "exit", "q"):
+        if user_input.lower() in ("quit", "exit", "q"):
             print("\n👋 再見！")
             break
 
-        # 更換聲音指令
-        if text.lower() == "voice":
-            new_voice = select_voice()
-            if new_voice:
-                current_voice = new_voice
-                print(f"  已切換聲音為: {current_voice}")
-            else:
-                print(f"  保持目前聲音: {current_voice}")
-            continue
+        # 隨機選詞
+        a_char, b_char = pick_random_word(word_lists)
 
-        # 產生輸出檔名
+        # 生成語音
         output_file = f"output_{file_counter:03d}.wav"
-        generate_speech(client, text, current_voice, output_file)
-        file_counter += 1
+        try:
+            synthesize_word(client, a_char, b_char)
+            file_counter += 1
+        except Exception as e:
+            print(f"❌ 生成語音時發生錯誤: {e}")
 
 
 if __name__ == "__main__":
-    interactive_mode()
+    main()
