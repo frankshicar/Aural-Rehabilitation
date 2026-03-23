@@ -4,3 +4,61 @@
 字詞表2.jpg
 /gemini_tts/result
 /gemini_tts/venv
+/gemini_tts/audio
+/gemini_tts/result
+/hearing-rehab-app/data
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyTorch
+*.pth
+*.pt
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# 模型檔案
+/models/
+*.bin
+*.safetensors
+
+# 音檔
+*.wav
+*.mp3
+*.flac
+
+# 日誌
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
